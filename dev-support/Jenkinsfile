@@ -117,309 +117,299 @@ curl -L  -o personality.sh "${env.PROJECT_PERSONALITY}"
         stash name: 'yetus', includes: "yetus-*/*,yetus-*/**/*,tools/personality.sh"
       }
     }
-    stage ('yetus general check') {
-      environment {
-        // TODO does hadoopcheck need to be jdk specific?
-        // Should be things that work with multijdk
-        TESTS = 'all,-unit,-findbugs'
-        // on branches that don't support jdk7, this will already be JAVA_HOME, so we'll end up not
-        // doing multijdk there.
-        MULTIJDK = '/usr/lib/jvm/java-8-openjdk-amd64'
-        OUTPUT_DIR_RELATIVE = "${env.OUTPUT_DIR_RELATIVE_GENERAL}"
-        OUTPUT_DIR = "${env.WORKSPACE}/${env.OUTPUT_DIR_RELATIVE_GENERAL}"
-      }
-      steps {
-        unstash 'yetus'
-        sh '''#!/usr/bin/env bash
-          rm -rf "${OUTPUT_DIR}" && mkdir "${OUTPUT_DIR}"
-          rm -rf "${OUTPUT_DIR}/machine" && mkdir "${OUTPUT_DIR}/machine"
-          "${BASEDIR}/dev-support/gather_machine_environment.sh" "${OUTPUT_DIR_RELATIVE}/machine"
+    stage ('health checks') {
+      parallel {
+        stage ('yetus general check') {
+          environment {
+            // TODO does hadoopcheck need to be jdk specific?
+            // Should be things that work with multijdk
+            TESTS = 'all,-unit,-findbugs'
+            // on branches that don't support jdk7, this will already be JAVA_HOME, so we'll end up not
+            // doing multijdk there.
+            MULTIJDK = '/usr/lib/jvm/java-8-openjdk-amd64'
+            OUTPUT_DIR_RELATIVE = "${env.OUTPUT_DIR_RELATIVE_GENERAL}"
+            OUTPUT_DIR = "${env.WORKSPACE}/${env.OUTPUT_DIR_RELATIVE_GENERAL}"
+          }
+          steps {
+            unstash 'yetus'
+            sh '''#!/usr/bin/env bash
+              rm -rf "${OUTPUT_DIR}" && mkdir "${OUTPUT_DIR}"
+              rm -rf "${OUTPUT_DIR}/machine" && mkdir "${OUTPUT_DIR}/machine"
+              "${BASEDIR}/dev-support/gather_machine_environment.sh" "${OUTPUT_DIR_RELATIVE}/machine"
 '''
-        // TODO should this be a download from master, similar to how the personality is?
-        sh '''#!/usr/bin/env bash
-          declare commentfile
-          rm -rf "${OUTPUT_DIR}/success}" "${OUTPUT_DIR}/failure"
-          if "${BASEDIR}/dev-support/hbase_nightly_yetus.sh" ; then
-            commentfile="${OUTPUT_DIR}/success"
-            echo '(/) {color:green}+1 general checks{color}' >> "${commentfile}"
-          else
-            commentfile="${OUTPUT_DIR}/failure"
-            echo '(x) {color:red}-1 general checks{color}' >> "${commentfile}"
-          fi
-          echo "-- For more information [see general report|${BUILD_URL}/General_Nightly_Build_Report/]" >> "${commentfile}"
-        '''
-      }
-      post {
-        always {
-          // Has to be relative to WORKSPACE.
-          archive "${env.OUTPUT_DIR_RELATIVE}/*"
-          archive "${env.OUTPUT_DIR_RELATIVE}/**/*"
-          publishHTML target: [
-            allowMissing: true,
-            keepAll: true,
-            alwaysLinkToLastBuild: true,
-            // Has to be relative to WORKSPACE
-            reportDir: "${env.OUTPUT_DIR_RELATIVE}",
-            reportFiles: 'console-report.html',
-            reportName: 'General Nightly Build Report'
-          ]
-        }
-      }
-    }
-    stage ('yetus jdk7 checks') {
-      when {
-        branch 'branch-1*'
-      }
-      environment {
-        TESTS = 'mvninstall,compile,javac,unit,htmlout'
-        OUTPUT_DIR_RELATIVE = "${env.OUTPUT_DIR_RELATIVE_JDK7}"
-        OUTPUT_DIR = "${env.WORKSPACE}/${env.OUTPUT_DIR_RELATIVE_JDK7}"
-        // On branches where we do jdk7 checks, jdk7 will be JAVA_HOME already.
-      }
-      steps {
-        unstash 'yetus'
-        sh '''#!/usr/bin/env bash
-          rm -rf "${OUTPUT_DIR}" && mkdir "${OUTPUT_DIR}"
-          rm -rf "${OUTPUT_DIR}/machine" && mkdir "${OUTPUT_DIR}/machine"
-          "${BASEDIR}/dev-support/gather_machine_environment.sh" "${OUTPUT_DIR_RELATIVE}/machine"
-'''
-        sh '''#!/usr/bin/env bash
-          # for branch-1.1 we don't do jdk8 findbugs, so do it here
-          if [ "${BRANCH_NAME}" == "branch-1.1" ]; then
-            TESTS+=",findbugs"
-          fi
-          declare commentfile
-          rm -rf "${OUTPUT_DIR}/success}" "${OUTPUT_DIR}/failure"
-          if "${BASEDIR}/dev-support/hbase_nightly_yetus.sh" ; then
-            commentfile="${OUTPUT_DIR}/success"
-            echo '(/) {color:green}+1 jdk7 checks{color}' >> "${commentfile}"
-          else
-            commentfile="${OUTPUT_DIR}/failure"
-            echo '(x) {color:red}-1 jdk7 checks{color}' >> "${commentfile}"
-          fi
-          echo "-- For more information [see jdk7 report|${BUILD_URL}/JDK7_Nightly_Build_Report/]" >> "${commentfile}"
-        '''
-      }
-      post {
-        always {
-          junit testResults: "${env.OUTPUT_DIR_RELATIVE}/**/target/**/TEST-*.xml", allowEmptyResults: true
-          // zip surefire reports.
-          sh '''#!/bin/bash -e
-            if [ -d "${OUTPUT_DIR}/archiver" ]; then
-              count=$(find "${OUTPUT_DIR}/archiver" -type f | wc -l)
-              if [[ 0 -ne ${count} ]]; then
-                echo "zipping ${count} archived files"
-                zip -q -m -r "${OUTPUT_DIR}/test_logs.zip" "${OUTPUT_DIR}/archiver"
+            // TODO roll this into the hbase_nightly_yetus script
+            sh '''#!/usr/bin/env bash
+              rm -rf "${OUTPUT_DIR}/commentfile}"
+              declare -i status=0
+              if "${BASEDIR}/dev-support/hbase_nightly_yetus.sh" ; then
+                echo '(/) {color:green}+1 general checks{color}' >> "${OUTPUT_DIR}/commentfile"
               else
-                echo "No archived files, skipping compressing."
+                echo '(x) {color:red}-1 general checks{color}' >> "${OUTPUT_DIR}/commentfile"
+                status=1
               fi
-            else
-              echo "No archiver directory, skipping compressing."
-            fi
-'''
-          // Has to be relative to WORKSPACE.
-          archive "${env.OUTPUT_DIR_RELATIVE}/*"
-          archive "${env.OUTPUT_DIR_RELATIVE}/**/*"
-          publishHTML target: [
-            allowMissing         : true,
-            keepAll              : true,
-            alwaysLinkToLastBuild: true,
-            // Has to be relative to WORKSPACE.
-            reportDir            : "${env.OUTPUT_DIR_RELATIVE}",
-            reportFiles          : 'console-report.html',
-            reportName           : 'JDK7 Nightly Build Report'
-          ]
+              echo "-- For more information [see general report|${BUILD_URL}/General_Nightly_Build_Report/]" >> "${OUTPUT_DIR}/commentfile"
+              exit "${status}"
+            '''
+          }
+          post {
+            always {
+              // Has to be relative to WORKSPACE.
+              archive "${env.OUTPUT_DIR_RELATIVE}/*"
+              archive "${env.OUTPUT_DIR_RELATIVE}/**/*"
+              publishHTML target: [
+                allowMissing: true,
+                keepAll: true,
+                alwaysLinkToLastBuild: true,
+                // Has to be relative to WORKSPACE
+                reportDir: "${env.OUTPUT_DIR_RELATIVE}",
+                reportFiles: 'console-report.html',
+                reportName: 'General Nightly Build Report'
+              ]
+            }
+          }
         }
-      }
-    }
-    stage ('yetus jdk8 hadoop2 checks') {
-      when {
-        not {
-          branch 'branch-1.1*'
-        }
-      }
-      environment {
-        TESTS = 'mvninstall,compile,javac,unit,findbugs,htmlout'
-        OUTPUT_DIR_RELATIVE = "${env.OUTPUT_DIR_RELATIVE_HADOOP2}"
-        OUTPUT_DIR = "${env.WORKSPACE}/${env.OUTPUT_DIR_RELATIVE_HADOOP2}"
-        // This isn't strictly needed on branches that only support jdk8, but doesn't hurt
-        // and is needed on branches that do both jdk7 and jdk8
-        SET_JAVA_HOME = '/usr/lib/jvm/java-8-openjdk-amd64'
-      }
-      steps {
-        unstash 'yetus'
-        sh '''#!/usr/bin/env bash
-          rm -rf "${OUTPUT_DIR}" && mkdir "${OUTPUT_DIR}"
-          rm -rf "${OUTPUT_DIR}/machine" && mkdir "${OUTPUT_DIR}/machine"
-          "${BASEDIR}/dev-support/gather_machine_environment.sh" "${OUTPUT_DIR_RELATIVE}/machine"
+        stage ('yetus jdk7 checks') {
+          when {
+            branch 'branch-1*'
+          }
+          environment {
+            TESTS = 'mvninstall,compile,javac,unit,htmlout'
+            OUTPUT_DIR_RELATIVE = "${env.OUTPUT_DIR_RELATIVE_JDK7}"
+            OUTPUT_DIR = "${env.WORKSPACE}/${env.OUTPUT_DIR_RELATIVE_JDK7}"
+            // On branches where we do jdk7 checks, jdk7 will be JAVA_HOME already.
+          }
+          steps {
+            unstash 'yetus'
+            sh '''#!/usr/bin/env bash
+              rm -rf "${OUTPUT_DIR}" && mkdir "${OUTPUT_DIR}"
+              rm -rf "${OUTPUT_DIR}/machine" && mkdir "${OUTPUT_DIR}/machine"
+              "${BASEDIR}/dev-support/gather_machine_environment.sh" "${OUTPUT_DIR_RELATIVE}/machine"
 '''
-        sh '''#!/usr/bin/env bash
-          declare commentfile
-          rm -rf "${OUTPUT_DIR}/success}" "${OUTPUT_DIR}/failure"
-          if "${BASEDIR}/dev-support/hbase_nightly_yetus.sh" ; then
-            commentfile="${OUTPUT_DIR}/success"
-            echo '(/) {color:green}+1 jdk8 hadoop2 checks{color}' >> "${commentfile}"
-          else
-            commentfile="${OUTPUT_DIR}/failure"
-            echo '(x) {color:red}-1 jdk8 hadoop2 checks{color}' >> "${commentfile}"
-          fi
-          echo "-- For more information [see jdk8 (hadoop2) report|${BUILD_URL}/JDK8_Nightly_Build_Report_(Hadoop2)/]" >> "${commentfile}"
-        '''
-      }
-      post {
-        always {
-          junit testResults: "${env.OUTPUT_DIR_RELATIVE}/**/target/**/TEST-*.xml", allowEmptyResults: true
-          // zip surefire reports.
-          sh '''#!/bin/bash -e
-            if [ -d "${OUTPUT_DIR}/archiver" ]; then
-              count=$(find "${OUTPUT_DIR}/archiver" -type f | wc -l)
-              if [[ 0 -ne ${count} ]]; then
-                echo "zipping ${count} archived files"
-                zip -q -m -r "${OUTPUT_DIR}/test_logs.zip" "${OUTPUT_DIR}/archiver"
+            sh '''#!/usr/bin/env bash
+              # for branch-1.1 we don't do jdk8 findbugs, so do it here
+              if [ "${BRANCH_NAME}" == "branch-1.1" ]; then
+                TESTS+=",findbugs"
+              fi
+              rm -rf "${OUTPUT_DIR}/commentfile}"
+              declare -i status=0
+              if "${BASEDIR}/dev-support/hbase_nightly_yetus.sh" ; then
+                echo '(/) {color:green}+1 jdk7 checks{color}' >> "${OUTPUT_DIR}/commentfile"
               else
-                echo "No archived files, skipping compressing."
+                echo '(x) {color:red}-1 jdk7 checks{color}' >> "${OUTPUT_DIR}/commentfile"
+                status=1
               fi
-            else
-              echo "No archiver directory, skipping compressing."
-            fi
+              echo "-- For more information [see jdk7 report|${BUILD_URL}/JDK7_Nightly_Build_Report/]" >> "${OUTPUT_DIR}/commentfile"
+              exit "${status}"
+            '''
+          }
+          post {
+            always {
+              junit testResults: "${env.OUTPUT_DIR_RELATIVE}/**/target/**/TEST-*.xml", allowEmptyResults: true
+              // zip surefire reports.
+              sh '''#!/bin/bash -e
+                if [ -d "${OUTPUT_DIR}/archiver" ]; then
+                  count=$(find "${OUTPUT_DIR}/archiver" -type f | wc -l)
+                  if [[ 0 -ne ${count} ]]; then
+                    echo "zipping ${count} archived files"
+                    zip -q -m -r "${OUTPUT_DIR}/test_logs.zip" "${OUTPUT_DIR}/archiver"
+                  else
+                    echo "No archived files, skipping compressing."
+                  fi
+                else
+                  echo "No archiver directory, skipping compressing."
+                fi
 '''
-          // Has to be relative to WORKSPACE.
-          archive "${env.OUTPUT_DIR_RELATIVE}/*"
-          archive "${env.OUTPUT_DIR_RELATIVE}/**/*"
-          publishHTML target: [
-            allowMissing         : true,
-            keepAll              : true,
-            alwaysLinkToLastBuild: true,
-            // Has to be relative to WORKSPACE.
-            reportDir            : "${env.OUTPUT_DIR_RELATIVE}",
-            reportFiles          : 'console-report.html',
-            reportName           : 'JDK8 Nightly Build Report (Hadoop2)'
-          ]
+              // Has to be relative to WORKSPACE.
+              archive "${env.OUTPUT_DIR_RELATIVE}/*"
+              archive "${env.OUTPUT_DIR_RELATIVE}/**/*"
+              publishHTML target: [
+                allowMissing         : true,
+                keepAll              : true,
+                alwaysLinkToLastBuild: true,
+                // Has to be relative to WORKSPACE.
+                reportDir            : "${env.OUTPUT_DIR_RELATIVE}",
+                reportFiles          : 'console-report.html',
+                reportName           : 'JDK7 Nightly Build Report'
+              ]
+            }
+          }
         }
-      }
-    }
-    stage ('yetus jdk8 hadoop3 checks') {
-      when {
-        not {
-          branch 'branch-1*'
-        }
-      }
-      environment {
-        TESTS = 'mvninstall,compile,javac,unit,htmlout'
-        OUTPUT_DIR_RELATIVE = "${env.OUTPUT_DIR_RELATIVE_HADOOP3}"
-        OUTPUT_DIR = "${env.WORKSPACE}/${env.OUTPUT_DIR_RELATIVE_HADOOP3}"
-        // This isn't strictly needed on branches that only support jdk8, but doesn't hurt
-        // and is needed on branches that do both jdk7 and jdk8
-        SET_JAVA_HOME = '/usr/lib/jvm/java-8-openjdk-amd64'
-        // Activates hadoop 3.0 profile in maven runs.
-        HADOOP_PROFILE = '3.0'
-      }
-      steps {
-        unstash 'yetus'
-        sh '''#!/usr/bin/env bash
-          rm -rf "${OUTPUT_DIR}" && mkdir "${OUTPUT_DIR}"
-          rm -rf "${OUTPUT_DIR}/machine" && mkdir "${OUTPUT_DIR}/machine"
-          "${BASEDIR}/dev-support/gather_machine_environment.sh" "${OUTPUT_DIR_RELATIVE}/machine"
+        stage ('yetus jdk8 hadoop2 checks') {
+          when {
+            not {
+              branch 'branch-1.1*'
+            }
+          }
+          environment {
+            TESTS = 'mvninstall,compile,javac,unit,findbugs,htmlout'
+            OUTPUT_DIR_RELATIVE = "${env.OUTPUT_DIR_RELATIVE_HADOOP2}"
+            OUTPUT_DIR = "${env.WORKSPACE}/${env.OUTPUT_DIR_RELATIVE_HADOOP2}"
+            // This isn't strictly needed on branches that only support jdk8, but doesn't hurt
+            // and is needed on branches that do both jdk7 and jdk8
+            SET_JAVA_HOME = '/usr/lib/jvm/java-8-openjdk-amd64'
+          }
+          steps {
+            unstash 'yetus'
+            sh '''#!/usr/bin/env bash
+              rm -rf "${OUTPUT_DIR}" && mkdir "${OUTPUT_DIR}"
+              rm -rf "${OUTPUT_DIR}/machine" && mkdir "${OUTPUT_DIR}/machine"
+              "${BASEDIR}/dev-support/gather_machine_environment.sh" "${OUTPUT_DIR_RELATIVE}/machine"
 '''
-        sh '''#!/usr/bin/env bash
-          declare commentfile
-          rm -rf "${OUTPUT_DIR}/success}" "${OUTPUT_DIR}/failure"
-          if "${BASEDIR}/dev-support/hbase_nightly_yetus.sh" ; then
-            commentfile="${OUTPUT_DIR}/success"
-            echo '(/) {color:green}+1 jdk8 hadoop3 checks{color}' >> "${commentfile}"
-          else
-            commentfile="${OUTPUT_DIR}/failure"
-            echo '(x) {color:red}-1 jdk8 hadoop3 checks{color}' >> "${commentfile}"
-          fi
-          echo "-- For more information [see jdk8 (hadoop3) report|${BUILD_URL}/JDK8_Nightly_Build_Report_(Hadoop3)/]" >> "${commentfile}"
-        '''
-      }
-      post {
-        always {
-          // Not sure how two junit test reports will work. Disabling this for now.
-          // junit testResults: "${env.OUTPUT_DIR_RELATIVE}/**/target/**/TEST-*.xml", allowEmptyResults: true
-          // zip surefire reports.
-          sh '''#!/bin/bash -e
-            if [ -d "${OUTPUT_DIR}/archiver" ]; then
-              count=$(find "${OUTPUT_DIR}/archiver" -type f | wc -l)
-              if [[ 0 -ne ${count} ]]; then
-                echo "zipping ${count} archived files"
-                zip -q -m -r "${OUTPUT_DIR}/test_logs.zip" "${OUTPUT_DIR}/archiver"
+            sh '''#!/usr/bin/env bash
+              rm -rf "${OUTPUT_DIR}/commentfile}"
+              declare -i status=0
+              if "${BASEDIR}/dev-support/hbase_nightly_yetus.sh" ; then
+                echo '(/) {color:green}+1 jdk8 hadoop2 checks{color}' >> "${OUTPUT_DIR}/commentfile"
               else
-                echo "No archived files, skipping compressing."
+                echo '(x) {color:red}-1 jdk8 hadoop2 checks{color}' >> "${OUTPUT_DIR}/commentfile"
+                status=1
               fi
-            else
-              echo "No archiver directory, skipping compressing."
-            fi
+              echo "-- For more information [see jdk8 (hadoop2) report|${BUILD_URL}/JDK8_Nightly_Build_Report_(Hadoop2)/]" >> "${OUTPUT_DIR}/commentfile"
+              exit "${status}"
+            '''
+          }
+          post {
+            always {
+              junit testResults: "${env.OUTPUT_DIR_RELATIVE}/**/target/**/TEST-*.xml", allowEmptyResults: true
+              // zip surefire reports.
+              sh '''#!/bin/bash -e
+                if [ -d "${OUTPUT_DIR}/archiver" ]; then
+                  count=$(find "${OUTPUT_DIR}/archiver" -type f | wc -l)
+                  if [[ 0 -ne ${count} ]]; then
+                    echo "zipping ${count} archived files"
+                    zip -q -m -r "${OUTPUT_DIR}/test_logs.zip" "${OUTPUT_DIR}/archiver"
+                  else
+                    echo "No archived files, skipping compressing."
+                  fi
+                else
+                  echo "No archiver directory, skipping compressing."
+                fi
 '''
-          // Has to be relative to WORKSPACE.
-          archive "${env.OUTPUT_DIR_RELATIVE}/*"
-          archive "${env.OUTPUT_DIR_RELATIVE}/**/*"
-          publishHTML target: [
-            allowMissing         : true,
-            keepAll              : true,
-            alwaysLinkToLastBuild: true,
-            // Has to be relative to WORKSPACE.
-            reportDir            : "${env.OUTPUT_DIR_RELATIVE}",
-            reportFiles          : 'console-report.html',
-            reportName           : 'JDK8 Nightly Build Report (Hadoop3)'
-          ]
+              // Has to be relative to WORKSPACE.
+              archive "${env.OUTPUT_DIR_RELATIVE}/*"
+              archive "${env.OUTPUT_DIR_RELATIVE}/**/*"
+              publishHTML target: [
+                allowMissing         : true,
+                keepAll              : true,
+                alwaysLinkToLastBuild: true,
+                // Has to be relative to WORKSPACE.
+                reportDir            : "${env.OUTPUT_DIR_RELATIVE}",
+                reportFiles          : 'console-report.html',
+                reportName           : 'JDK8 Nightly Build Report (Hadoop2)'
+              ]
+            }
+          }
         }
-      }
-    }
-    // This is meant to mimic what a release manager will do to create RCs.
-    // See http://hbase.apache.org/book.html#maven.release
-    stage ('create source tarball') {
-      tools {
-        maven 'Maven (latest)'
-        // this needs to be set to the jdk that ought to be used to build releases on the branch the Jenkinsfile is stored in.
-        jdk "JDK 1.8 (latest)"
-      }
-      steps {
-        sh '''#!/bin/bash -e
-          echo "Setting up directories"
-          rm -rf "output-srctarball" && mkdir "output-srctarball"
-          rm -rf "unpacked_src_tarball" && mkdir "unpacked_src_tarball"
-          rm -rf ".m2-for-repo" && mkdir ".m2-for-repo"
-          rm -rf ".m2-for-src" && mkdir ".m2-for-src"
-          rm -rf "src_tarball_success" "src_tarball_failure"
+        stage ('yetus jdk8 hadoop3 checks') {
+          when {
+            not {
+              branch 'branch-1*'
+            }
+          }
+          environment {
+            TESTS = 'mvninstall,compile,javac,unit,htmlout'
+            OUTPUT_DIR_RELATIVE = "${env.OUTPUT_DIR_RELATIVE_HADOOP3}"
+            OUTPUT_DIR = "${env.WORKSPACE}/${env.OUTPUT_DIR_RELATIVE_HADOOP3}"
+            // This isn't strictly needed on branches that only support jdk8, but doesn't hurt
+            // and is needed on branches that do both jdk7 and jdk8
+            SET_JAVA_HOME = '/usr/lib/jvm/java-8-openjdk-amd64'
+            // Activates hadoop 3.0 profile in maven runs.
+            HADOOP_PROFILE = '3.0'
+          }
+          steps {
+            unstash 'yetus'
+            sh '''#!/usr/bin/env bash
+              rm -rf "${OUTPUT_DIR}" && mkdir "${OUTPUT_DIR}"
+              rm -rf "${OUTPUT_DIR}/machine" && mkdir "${OUTPUT_DIR}/machine"
+              "${BASEDIR}/dev-support/gather_machine_environment.sh" "${OUTPUT_DIR_RELATIVE}/machine"
 '''
-        sh '''#!/usr/bin/env bash
-          rm -rf "output-srctarball/machine" && mkdir "output-srctarball/machine"
-          "${BASEDIR}/dev-support/gather_machine_environment.sh" "output-srctarball/machine"
+            sh '''#!/usr/bin/env bash
+              rm -rf "${OUTPUT_DIR}/commentfile}"
+              declare -i status=0
+              if "${BASEDIR}/dev-support/hbase_nightly_yetus.sh" ; then
+                echo '(/) {color:green}+1 jdk8 hadoop3 checks{color}' >> "${OUTPUT_DIR}/commentfile"
+              else
+                echo '(x) {color:red}-1 jdk8 hadoop3 checks{color}' >> "${OUTPUT_DIR}/commentfile"
+                status=1
+              fi
+              echo "-- For more information [see jdk8 (hadoop3) report|${BUILD_URL}/JDK8_Nightly_Build_Report_(Hadoop3)/]" >> "${OUTPUT_DIR}/commentfile"
+              exit "${status}"
+            '''
+          }
+          post {
+            always {
+              // Not sure how two junit test reports will work. Disabling this for now.
+              // junit testResults: "${env.OUTPUT_DIR_RELATIVE}/**/target/**/TEST-*.xml", allowEmptyResults: true
+              // zip surefire reports.
+              sh '''#!/bin/bash -e
+                if [ -d "${OUTPUT_DIR}/archiver" ]; then
+                  count=$(find "${OUTPUT_DIR}/archiver" -type f | wc -l)
+                  if [[ 0 -ne ${count} ]]; then
+                    echo "zipping ${count} archived files"
+                    zip -q -m -r "${OUTPUT_DIR}/test_logs.zip" "${OUTPUT_DIR}/archiver"
+                  else
+                    echo "No archived files, skipping compressing."
+                  fi
+                else
+                  echo "No archiver directory, skipping compressing."
+                fi
 '''
-        sh """#!/bin/bash -e
-          ${env.BASEDIR}/dev-support/hbase_nightly_source-artifact.sh \
-              --intermediate-file-dir output-srctarball \
-              --unpack-temp-dir unpacked_src_tarball \
-              --maven-m2-initial .m2-for-repo \
-              --maven-m2-src-build .m2-for-src \
-              --clean-source-checkout \
-              ${env.BASEDIR}
+              // Has to be relative to WORKSPACE.
+              archive "${env.OUTPUT_DIR_RELATIVE}/*"
+              archive "${env.OUTPUT_DIR_RELATIVE}/**/*"
+              publishHTML target: [
+                allowMissing         : true,
+                keepAll              : true,
+                alwaysLinkToLastBuild: true,
+                // Has to be relative to WORKSPACE.
+                reportDir            : "${env.OUTPUT_DIR_RELATIVE}",
+                reportFiles          : 'console-report.html',
+                reportName           : 'JDK8 Nightly Build Report (Hadoop3)'
+              ]
+            }
+          }
+        }
+        // This is meant to mimic what a release manager will do to create RCs.
+        // See http://hbase.apache.org/book.html#maven.release
+        stage ('create source tarball') {
+          tools {
+            maven 'Maven (latest)'
+            // this needs to be set to the jdk that ought to be used to build releases on the branch the Jenkinsfile is stored in.
+            jdk "JDK 1.8 (latest)"
+          }
+          steps {
+            sh '''#!/bin/bash -e
+              echo "Setting up directories"
+              rm -rf "output-srctarball" && mkdir "output-srctarball"
+              rm -rf "unpacked_src_tarball" && mkdir "unpacked_src_tarball"
+              rm -rf ".m2-for-repo" && mkdir ".m2-for-repo"
+              rm -rf ".m2-for-src" && mkdir ".m2-for-src"
+              rm -rf "src_tarball_commentfile"
+'''
+            sh '''#!/usr/bin/env bash
+              rm -rf "output-srctarball/machine" && mkdir "output-srctarball/machine"
+              "${BASEDIR}/dev-support/gather_machine_environment.sh" "output-srctarball/machine"
+'''
+            sh """#!/bin/bash -e
+              ${env.BASEDIR}/dev-support/hbase_nightly_source-artifact.sh \
+                  --intermediate-file-dir output-srctarball \
+                  --unpack-temp-dir unpacked_src_tarball \
+                  --maven-m2-initial .m2-for-repo \
+                  --maven-m2-src-build .m2-for-src \
+                  --clean-source-checkout \
+                  ${env.BASEDIR}
 """
-      }
-      post {
-        always {
-          archive 'output-srctarball/*'
-        }
-        // This approach only works because the source release artifact is the last stage that does work.
-        success {
-          writeFile file: "${env.WORKSPACE}/src_tarball_success", text: '(/) {color:green}+1 source release artifact{color}\n-- See build output for details.'
-        }
-        failure {
-          writeFile file: "${env.WORKSPACE}/src_tarball_failure", text: '(x) {color:red}-1 source release artifact{color}\n-- See build output for details.'
-        }
-      }
-    }
-    stage ('Fail if previous stages failed') {
-      steps {
-        script {
-          def failures = ['src_tarball_failure', "${env.OUTPUT_DIR_RELATIVE_GENERAL}/failure",
-                          "${env.OUTPUT_DIR_RELATIVE_JDK7}/failure", "${OUTPUT_DIR_RELATIVE_HADOOP2}/failure",
-                          "${env.OUTPUT_DIR_RELATIVE_HADOOP3}/failure"]
-          for ( failure_file in failures ) {
-            if (fileExists(file: failure_file)) {
-              error 'Failing job due to failure(s) in prior steps.'
+          }
+          post {
+            always {
+              archive 'output-srctarball/*'
+            }
+            // This approach only works because the source release artifact is the last stage that does work.
+            success {
+              writeFile file: "${env.WORKSPACE}/src_tarball_commentfile", text: '(/) {color:green}+1 source release artifact{color}\n-- See build output for details.'
+            }
+            failure {
+              writeFile file: "${env.WORKSPACE}/src_tarball_commentfile", text: '(x) {color:red}-1 source release artifact{color}\n-- See build output for details.'
             }
           }
         }
@@ -431,11 +421,11 @@ curl -L  -o personality.sh "${env.PROJECT_PERSONALITY}"
       script {
          try {
            sh "printenv"
-           def results = ["${env.OUTPUT_DIR_RELATIVE_GENERAL}/failure", "${env.OUTPUT_DIR_RELATIVE_GENERAL}/success",
-                          "${env.OUTPUT_DIR_RELATIVE_JDK7}/failure", "${env.OUTPUT_DIR_RELATIVE_JDK7}/success",
-                          "${env.OUTPUT_DIR_RELATIVE_HADOOP2}/failure", "${env.OUTPUT_DIR_RELATIVE_HADOOP2}/success",
-                          "${env.OUTPUT_DIR_RELATIVE_HADOOP3}/failure", "${env.OUTPUT_DIR_RELATIVE_HADOOP3}/success",
-                          'src_tarball_failure', 'src_tarball_success']
+           def results = ["${env.OUTPUT_DIR_RELATIVE_GENERAL}/commentfile",
+                          "${env.OUTPUT_DIR_RELATIVE_JDK7}/commentfile",
+                          "${env.OUTPUT_DIR_RELATIVE_HADOOP2}/commentfile",
+                          "${env.OUTPUT_DIR_RELATIVE_HADOOP3}/commentfile",
+                          'src_tarball_commentfile']
            echo env.BRANCH_NAME
            echo env.BUILD_URL
            echo currentBuild.result
