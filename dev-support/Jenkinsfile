@@ -402,10 +402,10 @@ curl -L  -o personality.sh "${env.PROJECT_PERSONALITY}"
           post {
             // This approach only works because the source release artifact is the last stage that does work.
             success {
-              writeFile file: "output-srctarball/commentfile", text: '(/) {color:green}+1 source release artifact{color}\n-- See build output for details.'
+              writeFile file: "output-srctarball/commentfile", text: '(/) {color:green}+1 source release artifact{color}\n-- See build output for details. 😃'
             }
             failure {
-              writeFile file: "output-srctarball/commentfile", text: '(x) {color:red}-1 source release artifact{color}\n-- See build output for details.'
+              writeFile file: "output-srctarball/commentfile", text: '(x) {color:red}-1 source release artifact{color}\n-- See build output for details. 🙁'
             }
             always {
               archive 'output-srctarball/*'
