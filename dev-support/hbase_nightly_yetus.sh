@@ -16,6 +16,17 @@
 # specific language governing permissions and limitations
 # under the License.
 
+chance=$RANDOM
+(("chance >>= 14"))
+if [ "$chance" -eq 1 ]; then
+  echo "[DEBUG] forcing failure."
+  echo "<html><body>Nightly test is disabled. This was a pretend failure.</body></html>" >"${OUTPUT_DIR}/console-report.html"
+else
+  echo "[DEBUG] forcing success."
+  echo "<html><body>Nightly test is disabled. This was a pretend success.</body></html>" >"${OUTPUT_DIR}/console-report.html"
+fi
+exit "$chance"
+
 declare -i missing_env=0
 # Validate params
 for required_env in "TESTS" "TOOLS" "BASEDIR" "ARCHIVE_PATTERN_LIST" "OUTPUT_DIR_RELATIVE" \
