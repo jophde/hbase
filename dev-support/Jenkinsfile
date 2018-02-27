@@ -384,7 +384,6 @@ curl -L  -o personality.sh "${env.PROJECT_PERSONALITY}"
               rm -rf "unpacked_src_tarball" && mkdir "unpacked_src_tarball"
               rm -rf ".m2-for-repo" && mkdir ".m2-for-repo"
               rm -rf ".m2-for-src" && mkdir ".m2-for-src"
-              rm -rf "src_tarball_commentfile"
 '''
             sh '''#!/usr/bin/env bash
               rm -rf "output-srctarball/machine" && mkdir "output-srctarball/machine"
@@ -401,15 +400,15 @@ curl -L  -o personality.sh "${env.PROJECT_PERSONALITY}"
 """
           }
           post {
-            always {
-              archive 'output-srctarball/*'
-            }
             // This approach only works because the source release artifact is the last stage that does work.
             success {
-              writeFile file: "${env.WORKSPACE}/src_tarball_commentfile", text: '(/) {color:green}+1 source release artifact{color}\n-- See build output for details.'
+              writeFile file: "output-srctarball/commentfile", text: '(/) {color:green}+1 source release artifact{color}\n-- See build output for details.'
             }
             failure {
-              writeFile file: "${env.WORKSPACE}/src_tarball_commentfile", text: '(x) {color:red}-1 source release artifact{color}\n-- See build output for details.'
+              writeFile file: "output-srctarball/commentfile", text: '(x) {color:red}-1 source release artifact{color}\n-- See build output for details.'
+            }
+            always {
+              archive 'output-srctarball/*'
             }
           }
         }
@@ -425,13 +424,13 @@ curl -L  -o personality.sh "${env.PROJECT_PERSONALITY}"
                           "${env.OUTPUT_DIR_RELATIVE_JDK7}/commentfile",
                           "${env.OUTPUT_DIR_RELATIVE_HADOOP2}/commentfile",
                           "${env.OUTPUT_DIR_RELATIVE_HADOOP3}/commentfile",
-                          'src_tarball_commentfile']
+                          'output-srctarball/commentfile']
            echo env.BRANCH_NAME
            echo env.BUILD_URL
            echo currentBuild.result
            echo currentBuild.durationString
            def comment = "Results for branch ${env.BRANCH_NAME}, done in ${currentBuild.durationString}\n"
-           comment += "\t[build ${currentBuild.displayName} on builds.a.o|${env.BUILD_URL}]: ${currentBuild.result}\n----\ndetails (if available):\n\n"
+           comment += "\t[build ${currentBuild.displayName} on builds.a.o|${env.BUILD_URL}]:\n----\ndetails (if available):\n\n"
            if (currentBuild.result == "SUCCESS") {
               comment += "(/) *{color:green}+1 overall{color}*\n\n"
            } else {
